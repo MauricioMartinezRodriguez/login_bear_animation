@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:rive/rive.dart';
 
+import 'dart:async'; //3.1 Importar el timer
+
 class LoginScreen extends StatefulWidget {
   const new({super.key});
 
@@ -9,43 +11,53 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  //Control para mostrar/ocultar contraseña
+  //Control para mostrar u ocultar la contraseña
   bool _obscure = true;
 
-//1.1 Crear el cerebro de la animacion
-StateMachineController? _controller;
-//SMI: State Machine Input / Entrada de la maquina de estados
-SMIBool? _isChecking;
-SMIBool? _isHandsUp;
-SMITrigger? _trigSuccess;
-SMITrigger? _trigFail;
+  //1.1 Crear el cerebro de la animacion
+  StateMachineController? _controller;
+  //SMT: State Machine Input / Entrada de maquina de estado
+  SMIBool? _isChecking;
+  SMIBool? _isHandsUp;
+  SMITrigger? _trigSuccess;
+  SMITrigger? _trigFail;
 
-//2.1 Crear las variables para FocusNode
-final _emailFocus = FocusNode();
-final _passwordFocus = FocusNode();
+  //3.2 Variable del reccorido de la mirada
+  SMINumber? _numLook;
 
-//2.2 Listeners (Oyentes/Chismosos)
-@override
-void initState() {
-  super.initState();
-  _emailFocus.addListener(() {
-    if (_emailFocus.hasFocus) {
-      //Verificar que no sea nulo
-      if (_isHandsUp != null) {
-        //Manos abajo en el email
-        _isHandsUp?.change(false);
+  //3.3 Timer para detener la mirada al dejar de escribir
+  Timer? _typingDebounce;
+
+  //2.1 Crear las variables para FocusNode
+  final _emailFocus =
+      FocusNode(); //Se llama node por un foco de cosas que puede hacer
+  final _passWordFocus = FocusNode();
+
+  //2.2 Listeners (Oyentes/chismosos) para saber cuando el usuario esta escribiendo en el campo de texto
+  @override
+  void initState() {
+    super.initState();
+    super.initState();
+    _emailFocus.addListener(() {
+      if (_emailFocus.hasFocus) {
+        //Verificar que no sea nulo
+        if (_isHandsUp != null) {
+          //Manos abajo en el email
+          _isHandsUp!.change(false);
+          //3.4 Mirada neutra
+          _numLook?.value = 50.0;
+        }
       }
-    }
-  });
-  _passwordFocus.addListener(() {
-      //Manos arriba en password
-      _isHandsUp?.change(_passwordFocus.hasFocus);
-  });
-}
+    });
+    _passWordFocus.addListener(() {
+      //Manos arriba en el password
+      _isHandsUp!.change(_passWordFocus.hasFocus);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    //para obtener el tamaño de la pantalla
+    //Para obtener el tamaño de la pantalla
     final Size size = MediaQuery.of(context).size;
     return Scaffold(
       body: SafeArea(
@@ -57,16 +69,16 @@ void initState() {
                 width: size.width,
                 height: 200,
                 child: RiveAnimation.asset(
-                  'login-bear.riv',
+                  'assets/login-bear.riv',
                   stateMachines: ['Login Machine'],
-                  //1.2 Vincular animacion
+                  //1.2 Vincular Animacion
                   onInit: (artboard) {
                     _controller = StateMachineController.fromArtboard(
                       artboard,
-                      'Login Machine'
+                      'Login Machine',
                     );
 
-                    //1.3 Verificar que inicio bien
+                    //1.3 Verificar que el controlador no sea nulo
                     if (_controller == null) return;
                     //Agrega el controlador al escenario/tablero
                     artboard.addController(_controller!);
@@ -75,12 +87,14 @@ void initState() {
                     _isHandsUp = _controller?.findSMI('isHandsUp');
                     _trigSuccess = _controller?.findSMI('trigSuccess');
                     _trigFail = _controller?.findSMI('trigFail');
+                    //3.5 Vincular numLook
+                    _numLook = _controller?.findSMI('numLook');
                   },
                 ),
               ),
-              //para separar espacios
-              SizedBox(height:10),
-              //Campo de texto para email
+              //Sizedbox para separar espacios
+              SizedBox(height: 10),
+              //Campo de texto para el correo
               TextField(
                 focusNode: _emailFocus,
                 onChanged: (value) {
@@ -88,56 +102,80 @@ void initState() {
                     //No tapes los ojos al ver email
                     //_isHandsUp!.change(false);
                   }
-                  //Si isChecking es nulo
-                  if (_isChecking == null) return;
-                  //Activar el modo chismoso
-                  _isChecking!.change(true);
+                  //Si isChecking no es nulo, cambiar el valor de la variable
+                  if (_isChecking != null) {
+                    //Activar modo chismoso
+                    _isChecking!.change(true);
+
+                    //3.6 Implementar numLook
+                    //Ajustes de límites del 0 al 100
+                    //80 es la medida de calibración para mirar al email
+                    final look = (value.length / 80.0 * 100.0).clamp(
+                      0.0,
+                      100.0,
+                    );
+                    //clamp es el rango (abrazadera) para que no se pase de 0 a 100
+                    _numLook?.value = look;
+
+                    //3.7 Debouce: si vuelve a teclear, reinicia el contador
+                    //Cancelar cualquier timer existente
+                    _typingDebounce?.cancel();
+                    //crear un nuevo timer
+                    _typingDebounce = Timer(const Duration(seconds: 3), () {
+                      //Si se cierra la pantalla, quita el contador
+                      if (!mounted) return;
+                      //Mirada neutra
+                      _isChecking?.change(false);
+                    });
+                  }
                 },
-                //Para mostrar el tipo de teclado
+                //para mostrar el tipo de teclado
                 keyboardType: TextInputType.emailAddress,
                 decoration: InputDecoration(
                   hintText: 'Email',
                   prefixIcon: const Icon(Icons.email),
                   border: OutlineInputBorder(
-                    //para redondear los bordes
+                    //Redondeo de bordes
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
               ),
               SizedBox(height: 10),
-              //Campo de texto para contraseña
-                TextField(
-                  //2.3 Asignar Foco al campo de texto
-                  focusNode: _passwordFocus,
-                  onChanged: (value) {
+              //Campo de texto para la contraseña
+              TextField(
+                //2.3 Asigna el foco al campo de texto
+                focusNode: _passWordFocus,
+                onChanged: (value) {
                   if (_isChecking != null) {
                     //No tapes los ojos al ver email
-                    //_isChecking!.change(false);
+                    _isChecking!.change(false);
                   }
-                  //Si isChecking es nulo
-                  if (_isHandsUp == null) return;
-                  //Activar el modo chismoso
-                  _isHandsUp!.change(true);
+                  //Si isChecking no es nulo, cambiar el valor de la variable
+                  if (_isHandsUp != null) {
+                    //Activar modo chismoso
+                    _isHandsUp!.change(true);
+                  }
                 },
                 obscureText: _obscure,
-                //Para mostrar el teclado
+                //para mostrar el tipo de teclado
                 decoration: InputDecoration(
                   hintText: 'Contraseña',
                   prefixIcon: const Icon(Icons.lock),
+                  //Operador ternario
                   suffixIcon: IconButton(
-                    //if operador ternario
+                    //If ternario
                     icon: Icon(
                       _obscure ? Icons.visibility : Icons.visibility_off,
                     ),
-                    onPressed: (){
-                      //Refrescar el icono
+                    onPressed: () {
+                      //Refrescar el estado del widget
                       setState(() {
                         _obscure = !_obscure;
                       });
                     },
-                    ),
+                  ),
                   border: OutlineInputBorder(
-                    //para redondear los bordes
+                    //Redondeo de bordes
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
@@ -148,11 +186,13 @@ void initState() {
       ),
     );
   }
+
   @override
   void dispose() {
-    //2.4 Liberar memoria de los FocusNode
+    //2.4 Liberar memoria al salir de la pantalla para liberar el foco
     _emailFocus.dispose();
-    _passwordFocus.dispose();
+    _passWordFocus.dispose();
+    _typingDebounce?.cancel(); //3.8  Cancelar el timer al salir de la pantalla
     super.dispose();
   }
 }
