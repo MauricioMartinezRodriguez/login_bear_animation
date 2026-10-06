@@ -41,6 +41,21 @@ class _LoginScreenState extends State<LoginScreen> {
   String? emailError;
   String? passError;
 
+  //Toggle / checkbox para "Recordarme"
+  bool _rememberMe = false;
+
+  //4.16 Anti-spam: bloquea el boton mientras la animacion se reproduce
+  bool _isBusy = false;
+  //4.16.1 Ya entramos a la animacion de resultado (exito/fallo)
+  bool _animationStarted = false;
+  //4.17 Timer de seguridad: libera el bloqueo si Rive nunca reporta el fin
+  Timer? _busySafetyTimer;
+
+  //Estados de la "Login Machine" que reproducen el resultado del login
+  static const Set<String> _resultStateNames = {'success9', 'fail9'};
+  //Tiempo maximo de bloqueo antes de liberar por seguridad
+  static const Duration _maxBusyLock = Duration(seconds: 5);
+
   //4.3 Validadores
   bool isValidEmail(String email) {
     //Expresion regular para validar el correo
@@ -58,6 +73,15 @@ class _LoginScreenState extends State<LoginScreen> {
 
   //4.4 Dar accion al boton
   void _onLogin() {
+    //4.4.1 Anti-spam: si ya hay una animacion corriendo, ignorar el toque
+    if (_isBusy) return;
+    //4.4.2 Bloquear el boton de inmediato
+    setState(() {
+      _isBusy = true;
+    });
+    //4.4.3 Red de seguridad: nunca dejar el boton bloqueado para siempre
+    _busySafetyTimer?.cancel();
+    _busySafetyTimer = Timer(_maxBusyLock, _releaseBusy);
     //4.5 De lo que escribio el usuario, quitar espacios en blanco
     final email = _emailCtrl.text.trim();
     final pass = _passCtrl.text;
@@ -85,6 +109,31 @@ class _LoginScreenState extends State<LoginScreen> {
     } else {
       _trigFail?.fire();
     }
+  }
+
+  //4.4.4 Rive avisa cuando la maquina de estados cambia de animacion
+  void _onRiveStateChange(String stateMachineName, String stateName) {
+    //Si entro a la animacion de resultado, seguimos bloqueados
+    if (_resultStateNames.contains(stateName)) {
+      _animationStarted = true;
+      return;
+    }
+    //La animacion de resultado empezo y ya salio => terminamos
+    if (_animationStarted) {
+      _releaseBusy();
+    }
+  }
+
+  //4.4.5 Quitar el bloqueo y rehabilitar el boton
+  void _releaseBusy() {
+    _busySafetyTimer?.cancel();
+    _busySafetyTimer = null;
+    _animationStarted = false;
+    if (!mounted) return;
+    if (!_isBusy) return;
+    setState(() {
+      _isBusy = false;
+    });
   }
 
   //2.2 Listeners (Oyentes/chismosos) para saber cuando el usuario esta escribiendo en el campo de texto
@@ -131,6 +180,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       _controller = StateMachineController.fromArtboard(
                         artboard,
                         'Login Machine',
+                        //4.4.6 Avisar cuando la maquina de estados cambia
+                        onStateChange: _onRiveStateChange,
                       );
 
                       //1.3 Verificar que el controlador no sea nulo
@@ -245,26 +296,84 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
                 SizedBox(height: 10),
-                //4.12 Texto olvide mi contraseña
+                //4.12 "Recordarme" a la izquierda y "Olvide mi contraseña" a la derecha
                 SizedBox(
                   width: size.width,
-                  child: const Text(
-                    'Olvide mi contraseña',
-                    textAlign: TextAlign.right,
-                    style: TextStyle(decoration: TextDecoration.underline),
+                  child: Row(
+                    children: [
+                      //Recordarme: checkbox
+                      InkWell(
+                        onTap: () {
+                          setState(() {
+                            _rememberMe = !_rememberMe;
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(8),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 4,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Transform.translate(
+                                //Compensa el margen interno del checkbox
+                                //para alinearlo opticamente con el texto
+                                offset: const Offset(-6, 0),
+                                child: SizedBox(
+                                  width: 32,
+                                  height: 32,
+                                  child: Checkbox(
+                                    value: _rememberMe,
+                                    onChanged: (value) {
+                                      setState(() {
+                                        _rememberMe = value ?? false;
+                                      });
+                                    },
+                                    visualDensity: VisualDensity.compact,
+                                    materialTapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              const Text(
+                                'Recordarme',
+                                style: TextStyle(fontSize: 14),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const Spacer(),
+                      const Text(
+                        'Olvide mi contraseña',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          decoration: TextDecoration.underline,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 10),
-                //4.13 Boton de login
+                //4.13 Boton de login (bloqueado mientras hay animacion)
                 MaterialButton(
                   minWidth: size.width,
                   height: 50,
                   color: Colors.deepPurple,
+                  disabledColor: Colors.deepPurple.withValues(alpha: 0.4),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  onPressed: _onLogin,
-                  child: Text('Login', style: TextStyle(color: Colors.white)),
+                  //4.13.1 null = sin interaccion mientras esta ocupado
+                  onPressed: _isBusy ? null : _onLogin,
+                  child: Text(
+                    _isBusy ? 'Procesando...' : 'Login',
+                    style: TextStyle(color: Colors.white),
+                  ),
                 ),
                 const SizedBox(height: 10),
                 //4.14 Boton de registro
@@ -307,6 +416,7 @@ class _LoginScreenState extends State<LoginScreen> {
     _emailFocus.dispose();
     _passWordFocus.dispose();
     _typingDebounce?.cancel(); //3.8  Cancelar el timer al salir de la pantalla
+    _busySafetyTimer?.cancel(); //4.17 Cancelar el timer de bloqueo
     super.dispose();
   }
 }
